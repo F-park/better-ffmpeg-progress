@@ -1,6 +1,5 @@
 from unittest import TestCase
 from unittest.mock import patch, MagicMock, mock_open
-import io
 from better_ffmpeg_progress import FfmpegProcess, ffmpeg_process
 
 # pyright:reportPrivateUsage=false
@@ -59,8 +58,8 @@ class TestFfmpegProgress(TestCase):
         process = FfmpegProcess(
             "ffmpeg -i test_in_1.mp4 -i test_in_2.mp4 test_out.mp4", hide_tips=True
         )
-        self.assertListEqual(list(process._iter_if_concat()), ["test_in_1.mp4", "test_in_2.mp4"])
+        self.assertListEqual(list(process._iter_expand()), ["test_in_1.mp4", "test_in_2.mp4"])
 
         mock_open(mock_open_, "file 'test_in_1.mp4'\nfile 'test_in_2.mp4'")
         process = FfmpegProcess("ffmpeg -f concat -i test.txt test_out.mp4", hide_tips=True)
-        self.assertListEqual(list(process._iter_if_concat()), ["test_in_1.mp4", "test_in_2.mp4"])
+        self.assertListEqual(list(process._iter_expand()), ["test_in_1.mp4", "test_in_2.mp4"])

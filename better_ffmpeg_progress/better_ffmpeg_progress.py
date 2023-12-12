@@ -6,7 +6,7 @@ import sys
 import tempfile
 from functools import wraps
 from pathlib import Path
-from typing import Callable, Optional, ClassVar
+from typing import Callable, Optional, ClassVar, Iterator
 from collections import defaultdict
 
 # TODO use `rich` instead of `tqdm`
@@ -84,7 +84,10 @@ class FfmpegProcessBase(abc.ABC):
 
     @staticmethod
     def progress_handler(
-        percentage: float, speed: float, eta: Optional[float], estimated_size: Optional[float]
+        percentage: float,
+        speed: float,
+        eta: Optional[float],
+        estimated_size: Optional[float],
     ):
         ...
 
@@ -141,7 +144,7 @@ class FfmpegProcess(FfmpegProcessBase):
         if self.__class__ != FfmpegProcess:
             self.run()
 
-    def _set_duration(self, file_path):
+    def _set_duration(self, file_path: str):
         try:
             process = subprocess.run(
                 [
@@ -172,7 +175,6 @@ class FfmpegProcess(FfmpegProcessBase):
     @staticmethod
     def _parse_commands(commands: "list[str]"):
         args: defaultdict[str, "list[str]"] = defaultdict(list)
-        out_file_path = None
 
         option_key = ""
         for command in commands:
@@ -214,11 +216,15 @@ class FfmpegProcess(FfmpegProcessBase):
 
         return args
 
-    def _iter_if_concat(self):
+    def _iter_expand(self) -> Iterator[str]:
         _inputs = self._parse_args["-i"]
+        # iterate the input while not concat mode
         if self._parse_args["-f"] != ["concat"]:
             yield from _inputs
             return
+
+        # iterate the txt file and yield file_name
+        # 'ffmpeg -f concat -i test.txt test_out.mp4' will enter here
         for _input_file in _inputs:
             with open(_input_file) as f:
                 for line in f:  # "file 'name.mp4'"
@@ -226,10 +232,34 @@ class FfmpegProcess(FfmpegProcessBase):
                     if line_parts[-1]:
                         yield line_parts[-1].partition("'")[0]  # ("name.mp4", "'", "")
 
+    def _set_correct_duration(self):
+        if (
+            "-t" not in self._parse_args
+            and "-ss" not in self._parse_args
+            and "-to" not in self._parse_args
+        ):
+            return
+
+        correct_duration = 0
+
+        if "-to" not in self._parse_args:
+            for time in self._parse_args["-t"]:
+                try:
+                    time = float(time)
+                except TypeError:
+                    return
+                else:
+                    correct_duration += time
+
+        # TODO get duration from '-to'
+
+        if self._duration_secs > correct_duration > 0:
+            self._duration_secs = correct_duration
+
     def _set_file_info(self, commands: "list[str]"):
         self._parse_args = self._parse_commands(commands[1:])
 
-        if self._parse_args[""] == []:
+        if "" not in self._parse_args:
             raise ValueError("can't not get output_file_path")
         out_file_path = self._parse_args[""][-1]
 
@@ -237,12 +267,13 @@ class FfmpegProcess(FfmpegProcessBase):
 
         self._out_file_path = out_file_path
 
-        for file_path in self._iter_if_concat():
+        for file_path in self._iter_expand():
             self._set_duration(file_path)
             if not self._can_get_duration:
                 break
 
         if self._can_get_duration:
+            self._set_correct_duration()
             self._ffmpeg_args += ["-progress", "pipe:1", "-nostats"]
 
     def _can_overwrite(self):
@@ -283,7 +314,7 @@ class FfmpegProcess(FfmpegProcessBase):
         if progress_handler is None:
             if ffmpeg_output.startswith("out_time_ms"):
                 seconds_processed = float(value) / 1_000_000
-                self._progress_bar.update(int(seconds_processed - self._progress_bar.n))
+                self._progress_bar.update(int(seconds_processed) - self._progress_bar.n)
             return
 
         if ffmpeg_output.startswith("total_size") and "N/A" not in value:
@@ -294,7 +325,7 @@ class FfmpegProcess(FfmpegProcessBase):
 
             self._percentage = (self._seconds_processed / self._duration_secs) * 100
 
-            if self._current_size is not None and self._percentage != 0.0:
+            if self._percentage != 0.0:
                 self._estimated_size = self._current_size * (100 / self._percentage)
 
         elif ffmpeg_output.startswith("speed"):
@@ -309,7 +340,7 @@ class FfmpegProcess(FfmpegProcessBase):
             if ffmpeg_output == "progress=end":
                 self._percentage = 100
                 self._eta = 0
-                self._progress_bar.update(int(self._duration_secs - self._progress_bar.n))
+                self._progress_bar.update(int(self._duration_secs) - self._progress_bar.n)
 
             progress_handler(self._percentage, self._speed, self._eta, self._estimated_size)
 
@@ -320,7 +351,7 @@ class FfmpegProcess(FfmpegProcessBase):
         ffmpeg_output_file,
         success_handler,
         error_handler,
-    ):
+    ) -> None:
         if not self._can_overwrite():
             return
         if ffmpeg_output_file is None:

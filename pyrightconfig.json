@@ -1,0 +1,17 @@
+{
+    "exclude": [
+        "build"
+    ],
+    // strictInference
+    "strictListInference": true,
+    "strictDictionaryInference": true,
+    "strictSetInference": true,
+    // Unnecessary
+    "reportUnnecessaryCast": true,
+    "reportUnnecessaryComparison": true,
+    "reportUnnecessaryContains": true,
+    "reportUnnecessaryIsInstance": true,
+    "reportUnnecessaryTypeIgnoreComment": "warning",
+    // Unused 
+    "reportUnusedImport": "warning",
+}
